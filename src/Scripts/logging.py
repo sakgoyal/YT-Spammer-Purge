@@ -2,15 +2,19 @@
 import json
 import os
 import shutil
+import traceback # Added for get_extra_json_data
 from datetime import datetime
 from typing import Any
 from unicodedata import category as unicode_category
 
 import requests
 
-from . import auth, utils
+# Removed 'auth' from this import line as it seems no longer directly used
+from . import utils, files
+# utils is still needed for choice, make_char_set, get_video_title (now takes service)
 from .shared_imports import B, F, S
-from .utils import ScanInstance, choice
+from .types import ScanInstance # Import ScanInstance directly from types
+from .utils import choice # Keep choice if it's used elsewhere in logging
 
 ##########################################################################################
 ############################### PRINT SPECIFIC COMMENTS ##################################
@@ -19,20 +23,21 @@ from .utils import ScanInstance, choice
 
 # First prepared comments into segments of 50 to be submitted to API simultaneously
 # Then uses print_prepared_comments() to print / log the comments
-def print_comments(current: 'ScanInstance', config: dict[str, str], scanVideoID: str, loggingEnabled: bool, scanMode: int, logMode: str | None = None, doWritePrint: bool = True):
+def print_comments(youtube_service: Any, current: 'ScanInstance', current_config: files.ConfigContainer, scanVideoID: str, loggingEnabled: bool, scanMode: int, logMode: str | None = None, doWritePrint: bool = True): # Added youtube_service
     j = 0  # Counting index when going through comments all comment segments
+    commentsContents = "" # Initialize commentsContents
 
     # Print filter matched comments
-    j, commentsContents = print_prepared_comments(current, commentsContents, scanVideoID, list(current.matchedCommentsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Filter Match")
+    j, commentsContents = print_prepared_comments(youtube_service, current, commentsContents, scanVideoID, list(current.matchedCommentsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Filter Match")
     # Print comments of other match types
     if current.spamThreadsDict:
-        j, commentsContents = print_prepared_comments(current, commentsContents, scanVideoID, list(current.spamThreadsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Spam Bot Thread")
+        j, commentsContents = print_prepared_comments(youtube_service, current, commentsContents, scanVideoID, list(current.spamThreadsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Spam Bot Thread")
     if current.otherCommentsByMatchedAuthorsDict:
-        j, commentsContents = print_prepared_comments(current, commentsContents, scanVideoID, list(current.otherCommentsByMatchedAuthorsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Also By Matched Author")
+        j, commentsContents = print_prepared_comments(youtube_service, current, commentsContents, scanVideoID, list(current.otherCommentsByMatchedAuthorsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Also By Matched Author")
     if current.duplicateCommentsDict:
-        j, commentsContents = print_prepared_comments(current, commentsContents, scanVideoID, list(current.duplicateCommentsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Duplicate")
+        j, commentsContents = print_prepared_comments(youtube_service, current, commentsContents, scanVideoID, list(current.duplicateCommentsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Duplicate")
     if current.repostedCommentsDict:
-        j, commentsContents = print_prepared_comments(current, commentsContents, scanVideoID, list(current.repostedCommentsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Repost")
+        j, commentsContents = print_prepared_comments(youtube_service, current, commentsContents, scanVideoID, list(current.repostedCommentsDict.keys()), j, loggingEnabled, scanMode, logMode, doWritePrint, matchReason="Repost")
 
     # Writes everything to the log file
     if loggingEnabled and doWritePrint:
@@ -51,8 +56,8 @@ def print_comments(current: 'ScanInstance', config: dict[str, str], scanVideoID:
             possibleFalsePositive = True
             break
     for sample in current.matchSamplesDict.values():
-        if sample['nameAndTextColorized'] is not None:
-            knownSpamListMatch = True
+        if sample['nameAndTextColorized'] is not None: # This seems to check for colorization, not a specific spam list match flag
+            knownSpamListMatch = True # Assuming colorized means it matched a known spam list item
             break
 
     # Print Sample Match List
@@ -71,6 +76,7 @@ def print_comments(current: 'ScanInstance', config: dict[str, str], scanVideoID:
     hasDuplicates = False
     hasSpamThreads = False
     hasReposts = False
+    spamThreadNotice = False # Initialize
 
     # Decide whether to write notice for spam threads based on video title
     if current.spamThreadsDict and current.vidTitleDict:
@@ -112,23 +118,29 @@ def print_comments(current: 'ScanInstance', config: dict[str, str], scanVideoID:
             print(f"{F.GREEN}======= {B.GREEN}{F.BLACK} NOTE: {S.R}{F.GREEN} Possible false positives marked with * and highlighted in green. Check them extra well! ======={S.R}")
         if knownSpamListMatch:
             print(f"{F.RED}*NOTE: Specific matches from known spam lists are highlighted in red.{S.R}")
+
+    similarity = "" # Initialize
+    minDupes = "" # Initialize
+    repostSimilarity = "" # Initialize
+    minLength = "" # Initialize
+
     for value in current.matchSamplesDict.values():
         if value['matchReason'] != "Duplicate" and value['matchReason'] != "Spam Bot Thread" and value['matchReason'] != "Repost":
             valuesPreparedToWrite, valuesPreparedToPrint = print_and_write(value, valuesPreparedToWrite, valuesPreparedToPrint)
         # If there are duplicates, save those to print later, but get ready by calculating some duplicate info
         elif value['matchReason'] == "Duplicate":
             hasDuplicates = True
-            similarity = str(round(float(config['levenshtein_distance']) * 100)) + "%"
-            minDupes = str(config['minimum_duplicates'])
+            similarity = str(round(float(current_config.detection.levenshtein_distance) * 100)) + "%"
+            minDupes = str(current_config.detection.minimum_duplicates)
         elif value['matchReason'] == "Spam Bot Thread":
             hasSpamThreads = True
         elif value['matchReason'] == "Repost":
             hasReposts = True
-            if config['fuzzy_stolen_comment_detection']:
-                repostSimilarity = str(round(float(config['levenshtein_distance']) * 100)) + "%"
+            if current_config.detection.fuzzy_stolen_comment_detection:
+                repostSimilarity = str(round(float(current_config.detection.levenshtein_distance) * 100)) + "%"
             else:
                 repostSimilarity = "100%"
-            minLength = str(config['stolen_minimum_text_length'])
+            minLength = str(current_config.detection.stolen_minimum_text_length)
     if doWritePrint:
         print(valuesPreparedToPrint)
 
@@ -158,12 +170,14 @@ def print_comments(current: 'ScanInstance', config: dict[str, str], scanVideoID:
 
     # Print Repost Match Samples
     if hasReposts:
-        print(f"{F.LIGHTMAGENTA_EX}------------------------- {S.BRIGHT}{F.WHITE}{B.BLUE} Non-Matched {S.R}{F.LIGHTCYAN_EX} Commenters, But Who Reposted a Previous Comment{F.LIGHTMAGENTA_EX} -------------------------{S.R}")
-        print(f"{F.MAGENTA}---------------------------- ( {F.LIGHTBLUE_EX}Similarity Threshold: {repostSimilarity}  |  Minimum Length: {minLength}{F.MAGENTA} ) ------------------------------{S.R}")
+        if doWritePrint:
+            print(f"{F.LIGHTMAGENTA_EX}------------------------- {S.BRIGHT}{F.WHITE}{B.BLUE} Non-Matched {S.R}{F.LIGHTCYAN_EX} Commenters, But Who Reposted a Previous Comment{F.LIGHTMAGENTA_EX} -------------------------{S.R}")
+            print(f"{F.MAGENTA}---------------------------- ( {F.LIGHTBLUE_EX}Similarity Threshold: {repostSimilarity}  |  Minimum Length: {minLength}{F.MAGENTA} ) ------------------------------{S.R}")
     for value in current.matchSamplesDict.values():
         if value['matchReason'] == "Repost":
             repostValuesToWrite, repostValuesToPrint = print_and_write(value, repostValuesToWrite, repostValuesToPrint)
-    print(repostValuesToPrint)
+    if doWritePrint: # Changed from print(repostValuesToPrint) to if doWritePrint: print(...)
+        print(repostValuesToPrint)
 
     # --------------------------------------------------
 
@@ -217,17 +231,24 @@ def print_comments(current: 'ScanInstance', config: dict[str, str], scanVideoID:
                 duplicateSamplesContent += f"---------------------- ( Similarity Threshold: {similarity}  |  Minimum Duplicates: {minDupes} ) ----------------------\n" + duplicateValuesToWrite
                 if doWritePrint:
                     write_plaintext_log(current.logFileName, duplicateSamplesContent)
+            if hasReposts: # Added this block for plaintext reposts
+                repostSamplesContent = "\n-------------------- Non-Matched Commenters, But Who Reposted a Previous Comment --------------------\n"
+                repostSamplesContent += f"------------------------ ( Similarity Threshold: {repostSimilarity}  |  Minimum Length: {minLength} ) ------------------------\n" + repostValuesToWrite
+                if doWritePrint:
+                    write_plaintext_log(current.logFileName, repostSamplesContent)
+
 
         # Entire Contents of Log File
         logFileContents = commentsContents + matchSamplesContent + spamThreadSamplesContent + duplicateSamplesContent + repostSamplesContent
-        if hasReposts:
-            repostSamplesContent = "\n-------------------- Non-Matched Commenters, But Who Reposted a Previous Comment --------------------\n"
-            repostSamplesContent += f"------------------------ ( Similarity Threshold: {repostSimilarity}  |  Minimum Length: {minLength} ) ------------------------\n" + repostValuesToWrite
-            if doWritePrint:
-                write_plaintext_log(current.logFileName, repostSamplesContent)
+        # This part was writing repostSamplesContent twice for plaintext, removed the redundant one.
+        # if hasReposts:
+        #     repostSamplesContent = "\n-------------------- Non-Matched Commenters, But Who Reposted a Previous Comment --------------------\n"
+        #     repostSamplesContent += f"------------------------ ( Similarity Threshold: {repostSimilarity}  |  Minimum Length: {minLength} ) ------------------------\n" + repostValuesToWrite
+        #     if doWritePrint:
+        #         write_plaintext_log(current.logFileName, repostSamplesContent)
     else:
         logFileContents = None
-        logMode = None
+        # logMode = None # logMode is a parameter and shouldn't be reset here
     if doWritePrint:
         print(f"{F.LIGHTMAGENTA_EX}==================== (See log file for channel IDs of matched authors above) ===================={S.R}")
 
@@ -238,7 +259,7 @@ def print_comments(current: 'ScanInstance', config: dict[str, str], scanVideoID:
 
 
 # Uses comments.list YouTube API Request to get text and author of specific set of comments, based on comment ID
-def print_prepared_comments(current: ScanInstance, commentsContents: str, scanVideoID: str, comments: list[str], j: int, loggingEnabled, scanMode, logMode, doWritePrint, matchReason) -> tuple[int, str]:
+def print_prepared_comments(youtube_service: Any, current: ScanInstance, commentsContents: str, scanVideoID: str, comments: list[str], j: int, loggingEnabled, scanMode, logMode, doWritePrint, matchReason) -> tuple[int, str]: # Added youtube_service
     if matchReason != "Filter Match":
         dividerString = "============================================================================================"
         reasonString = ""
@@ -342,7 +363,7 @@ def print_prepared_comments(current: ScanInstance, commentsContents: str, scanVi
             if isRepost:
                 print("         >> Original Comment ID: " + repostLink)
         if scanVideoID is None:  # Only print video title if searching entire channel
-            title = utils.get_video_title(current, videoID)  # Get Video Title
+            title = utils.get_video_title(youtube_service, current, videoID)  # Get Video Title, pass youtube_service
             if doWritePrint:
                 print("     > Video: " + title)
         if doWritePrint:
@@ -538,7 +559,7 @@ def write_rtf(fileName: str | None, newText: str | None = None, firstWrite: bool
 ############################ Plaintext Log & File Handling ###############################
 
 
-def write_plaintext_log(fileName: str, newText=None, firstWrite=False, fullWrite=False):
+def write_plaintext_log(fileName: str, newText: str | None ="", firstWrite=False, fullWrite=False): # Default newText to ""
     success = False
     attempts = 0
     if firstWrite or fullWrite:
@@ -592,27 +613,46 @@ def write_plaintext_log(fileName: str, newText=None, firstWrite=False, fullWrite
 
 
 ############################ JSON Log & File Handling ###############################
-def write_json_log(current: ScanInstance, config, jsonSettingsDict: dict[str, Any], commentsDict, jsonDataDict: dict[str, Any] | None = None):
+def write_json_log(current: ScanInstance, current_config: files.ConfigContainer, jsonSettingsDict: dict[str, Any], commentsDict: dict, jsonDataDict: dict[str, Any] | None = None):
     success = False
     attempts = 0
+    dictionaryToWrite: dict[str, Any] # Type hint
+
     if jsonDataDict:
         jsonDataDict['Comments'] = commentsDict
         dictionaryToWrite = jsonDataDict
     else:
-        dictionaryToWrite = commentsDict
+        dictionaryToWrite = commentsDict # commentsDict itself might not have the 'Comments' top-level key expected by all_comments logic
 
-    fileName = jsonSettingsDict['jsonLogFileName']
-    jsonEncoding = jsonSettingsDict['encoding']
+    fileName = jsonSettingsDict.get('jsonLogFileName')
+    if not fileName:
+        print(f"{F.RED}Error: jsonLogFileName not found in jsonSettingsDict. Cannot write JSON log.{S.R}")
+        return
+
+    jsonEncoding = jsonSettingsDict.get('encoding', 'utf-8') # Default to utf-8 if not found
 
     # Marks comments as spam in dictionary before writing
-    if config['json_log_all_comments']:
+    if current_config.logging.json_log_all_comments:
         allCommentsDict = current.allScannedCommentsDict
+        # Ensure dictionaryToWrite has a 'Comments' key if we are logging all comments
+        # and it's based on the spam comments initially in commentsDict
+        spam_comment_ids_for_marking = {}
+        if 'Comments' in dictionaryToWrite and isinstance(dictionaryToWrite['Comments'], dict):
+            spam_comment_ids_for_marking = dictionaryToWrite['Comments']
+        elif isinstance(dictionaryToWrite, dict) and not jsonDataDict: # If dictionaryToWrite is just commentsDict
+            spam_comment_ids_for_marking = dictionaryToWrite
+
+
         for authorID in allCommentsDict:
             for i, comment in enumerate(allCommentsDict[authorID]):
-                if comment['commentID'] in dictionaryToWrite['Comments']:  # If it's in the dictionary with spam comments
-                    commentID = comment['commentID']
-                    allCommentsDict[authorID][i]['isSpam'] = 'True'
-                    allCommentsDict[authorID][i]['matchReason'] = dictionaryToWrite['Comments'][commentID]['matchReason']
+                comment_id_to_check = comment.get('commentID')
+                if comment_id_to_check and comment_id_to_check in spam_comment_ids_for_marking:
+                    allCommentsDict[authorID][i]['isSpam'] = True # Changed to boolean True
+                    # Ensure the source of matchReason is valid
+                    if comment_id_to_check in spam_comment_ids_for_marking and 'matchReason' in spam_comment_ids_for_marking[comment_id_to_check]:
+                        allCommentsDict[authorID][i]['matchReason'] = spam_comment_ids_for_marking[comment_id_to_check]['matchReason']
+                    else:
+                         allCommentsDict[authorID][i]['matchReason'] = "N/A" # Default if not found
 
     # If directory does not exist for desired log file path, create it
     logFolderPath = os.path.dirname(os.path.realpath(fileName))
@@ -629,16 +669,22 @@ def write_json_log(current: ScanInstance, config, jsonSettingsDict: dict[str, An
         try:
             attempts += 1
             with open(fileName, "w", encoding=jsonEncoding) as file:
-                if config['json_log_all_comments']:
+                if current_config.logging.json_log_all_comments:
                     # Dictionary format arranged by author ID, need to flatten to just comment info
-                    for authorCommentsList in allCommentsDict.values():
-                        for comment in authorCommentsList:
-                            json_record = json.dumps(comment, ensure_ascii=False)
-                            file.write(json_record + '\n')
-                    file.close()
+                    if 'allCommentsDict' in locals() or 'allCommentsDict' in globals(): # Check if allCommentsDict was defined
+                        for authorCommentsList in allCommentsDict.values():
+                            for comment in authorCommentsList:
+                                json_record = json.dumps(comment, ensure_ascii=False)
+                                file.write(json_record + '\n')
+                    else:
+                        # This case should ideally not be reached if json_log_all_comments is true,
+                        # but as a fallback, write dictionaryToWrite.
+                        print(f"{F.YELLOW}Warning: json_log_all_comments is true, but allCommentsDict is not available. Writing standard dictionary.{S.R}")
+                        file.write(json.dumps(dictionaryToWrite, indent=4, ensure_ascii=False))
+                    # file.close() # file is closed by with statement
                 else:
                     file.write(json.dumps(dictionaryToWrite, indent=4, ensure_ascii=False))
-                    file.close()
+                    # file.close() # file is closed by with statement
             success = True
         except PermissionError:
             if attempts < 3:
@@ -653,32 +699,40 @@ def write_json_log(current: ScanInstance, config, jsonSettingsDict: dict[str, An
 ############################ Get Extra JSON Data and Profile Pictures ###############################
 
 
-def get_extra_json_data(channelIDs, jsonSettingsDict):
-    channelOwnerID = jsonSettingsDict['channelOwnerID']
-    channelOwnerName = jsonSettingsDict['channelOwnerName']
+def get_extra_json_data(youtube_service: Any, channelIDs: list[str], jsonSettingsDict: dict[str, Any]): # Added youtube_service
+    channelOwnerID = jsonSettingsDict.get('channelOwnerID') # Use .get for safety
+    channelOwnerName = jsonSettingsDict.get('channelOwnerName') # Use .get for safety
     getPicsBool = False
+    pictureUrlsDict: dict[str, str] = {} # Initialize
 
     # Construct extra json data dictionary
-    jsonExtraDataDict = {"Comments": {}, "CommentAuthorInfo": {}, "UploaderInfo": {}}
+    jsonExtraDataDict: dict[str, Any] = {"Comments": {}, "CommentAuthorInfo": {}, "UploaderInfo": {}}
 
-    if jsonSettingsDict['json_profile_picture']:
+    if jsonSettingsDict.get('json_profile_picture'): # Use .get for safety
         getPicsBool = True
-        pictureUrlsDict = {}
-        resolution = jsonSettingsDict['json_profile_picture']
-        possibleResolutions = ['default', 'medium', 'high']
-        if resolution not in possibleResolutions:
-            print(f"{B.RED}{F.BLACK}Invalid Resolution!{S.R} Defaulting to 'default' (smallest)")
-            resolution = 'default'
+        # pictureUrlsDict is already initialized
+    resolution = jsonSettingsDict.get('json_profile_picture') # Use .get for safety
+    possibleResolutions = ['default', 'medium', 'high', True] # True might be passed if it's just enabled, not a specific res
+
+    # Determine actual resolution string if 'json_profile_picture' is True (meaning enabled, use default) or a valid string
+    actual_resolution_for_api = 'default' # Default
+    if isinstance(resolution, str) and resolution.lower() in possibleResolutions[:-1]: # Check against 'default', 'medium', 'high'
+        actual_resolution_for_api = resolution.lower()
+    elif resolution is True: # If it's just True, use 'default'
+        actual_resolution_for_api = 'default'
+    elif resolution and resolution not in possibleResolutions: # If it's some other string not in known resolutions
+        print(f"{B.RED}{F.BLACK}Invalid Resolution '{resolution}'!{S.R} Defaulting to 'default' (smallest)")
+        # actual_resolution_for_api is already 'default'
 
     total = len(channelIDs)
     fieldsToFetch = "items/id,items/snippet/publishedAt,items/statistics"
 
-    if jsonSettingsDict['json_profile_picture']:
-        fieldsToFetch += f",items/snippet/thumbnails/{resolution}/url,items/id"
+    if getPicsBool: # getPicsBool is already correctly set based on jsonSettingsDict['json_profile_picture']
+        fieldsToFetch += f",items/snippet/thumbnails/{actual_resolution_for_api}/url,items/id"
 
     def fetch_data(channelIdGroup):
         try:
-            response = auth.YOUTUBE.channels().list(part="snippet,statistics", id=channelIdGroup, fields=fieldsToFetch).execute()
+            response = youtube_service.channels().list(part="snippet,statistics", id=channelIdGroup, fields=fieldsToFetch).execute()
             if response['items']:
                 for infoDict in response['items']:
                     tempDict = {}
@@ -686,10 +740,11 @@ def get_extra_json_data(channelIDs, jsonSettingsDict):
                     tempDict['PublishedAt'] = infoDict['snippet']['publishedAt']
                     tempDict['Statistics'] = infoDict['statistics']
                     if getPicsBool:
-                        picURL = infoDict['snippet']['thumbnails'][resolution]['url']
+                        # actual_resolution_for_api should be used here
+                        picURL = infoDict['snippet']['thumbnails'][actual_resolution_for_api]['url']
                         pictureUrlsDict[channelID] = picURL
                     jsonExtraDataDict['CommentAuthorInfo'][channelID] = tempDict
-        except:
+        except Exception: # Catch specific Exception
             traceback.print_exc()
             print("Error occurred when fetching extra JSON data.")
             return False
@@ -709,10 +764,11 @@ def get_extra_json_data(channelIDs, jsonSettingsDict):
         pass
 
     # Get info about uploader
-    response = auth.YOUTUBE.channels().list(part="snippet,statistics", id=channelOwnerID, fields=fieldsToFetch).execute()
-    if response['items']:
-        tempDict = {}
-        tempDict['PublishedAt'] = response['items'][0]['snippet']['publishedAt']
+    if channelOwnerID: # Ensure channelOwnerID is not None
+        response = youtube_service.channels().list(part="snippet,statistics", id=channelOwnerID, fields=fieldsToFetch).execute()
+        if response.get('items'): # Use .get for safety
+            tempDict = {}
+            tempDict['PublishedAt'] = response['items'][0]['snippet']['publishedAt']
         tempDict['Statistics'] = response['items'][0]['statistics']
         tempDict['ChannelID'] = channelOwnerID
         tempDict['ChannelName'] = channelOwnerName
@@ -902,79 +958,78 @@ def mark_possible_false_positive(current: ScanInstance, authorID, text, matchRea
 
 
 # Determine log file and json log file locations and names
-def prepare_logFile_settings(current: ScanInstance, config: dict[str, str], miscData: dict, jsonSettingsDict: dict, filtersDict: dict, bypass: bool):
+def prepare_logFile_settings(current: ScanInstance, current_config: files.ConfigContainer, miscData: dict, jsonSettingsDict: dict, filtersDict: dict, bypass: bool):
     logMode: str | None = None
     logFileType = None
     jsonLogging = False
+    jsonLogFileName = "" # Initialize
 
-    logMode = config['log_mode']
+    logMode = current_config.logging.log_mode
     if logMode == "rtf":
         logFileType = ".rtf"
     elif logMode == "plaintext":
         logFileType = ".txt"
     else:
-        print("Invalid value for 'log_mode' in config file:  " + logMode)
+        print(f"Invalid value for 'log_mode' in config file: {logMode}")
         print("Defaulting to .rtf file")
         logMode = "rtf"
+        logFileType = ".rtf" # Ensure logFileType is set for default case
 
     # Prepare log file names
     fileNameBase = "Spam_Log_" + current.logTime
     fileName = fileNameBase + logFileType
 
-    try:
-        # Get json logging settings
-        if config['json_log']:
-            jsonLogging = True
-            jsonLogFileName = fileNameBase + ".json"
-            jsonSettingsDict['channelOwnerID'] = miscData.channelOwnerID
-            jsonSettingsDict['channelOwnerName'] = miscData.channelOwnerName
+    # Get json logging settings
+    if current_config.logging.json_log:
+        jsonLogging = True
+        jsonLogFileName = fileNameBase + ".json"
+        jsonSettingsDict['channelOwnerID'] = miscData.get('channelOwnerID') # Use .get for safety
+        jsonSettingsDict['channelOwnerName'] = miscData.get('channelOwnerName') # Use .get for safety
 
-            # Encoding
-            jsonSettingsDict['encoding'] = config['json_encoding']
+        # Encoding
+        jsonSettingsDict['encoding'] = current_config.logging.json_encoding
+    else: # Handles both False and potentially invalid string values if schema changes
+        jsonLogging = False
+        if isinstance(current_config.logging.json_log, str) and current_config.logging.json_log.lower() not in ["true", "false"]:
+             print(f"Invalid value for 'json_log' in config file: {current_config.logging.json_log}")
+             print("Defaulting to False (no JSON log file will be created)")
 
-        elif not config['json_log']:
-            jsonLogging = False
-        else:
-            print("Invalid value for 'json_log' in config file:  " + config['json_log'])
-            print("Defaulting to False (no JSON log file will be created)")
-            jsonLogging = False
 
-        if config['json_extra_data']:
-            jsonSettingsDict['json_extra_data'] = True
-        elif not config['json_extra_data']:
-            jsonSettingsDict['json_extra_data'] = False
+    jsonSettingsDict['json_extra_data'] = current_config.logging.json_extra_data
 
-        if config['json_profile_picture']:
-            jsonSettingsDict['json_profile_picture'] = config['json_profile_picture']
-            jsonSettingsDict['logTime'] = current.logTime
-        elif not config['json_profile_picture']:
-            jsonSettingsDict['json_profile_picture'] = False
+    if current_config.logging.json_profile_picture_mode and current_config.logging.json_profile_picture_mode != "false": # Check it's not "false" string
+        jsonSettingsDict['json_profile_picture'] = current_config.logging.json_profile_picture_mode # The value is the resolution or 'true'
+        jsonSettingsDict['logTime'] = current.logTime
+    else:
+        jsonSettingsDict['json_profile_picture'] = False
 
-    except KeyError:
-        print("Problem getting JSON settings, is your config file correct?")
 
     # Set where to put log files
     defaultLogPath = "logs"
-    if config['log_path']:
-        if config['log_path'] == "default":  # For backwards compatibility, can remove later on
-            logPath = defaultLogPath
-        else:
-            logPath = config['log_path']
-        current.logFileName = os.path.normpath(logPath + "/" + fileName)
-        print(f"Log file will be located at {F.YELLOW}" + current.logFileName + f"{S.R}\n")
-        if jsonLogging:
-            jsonLogFileName = os.path.normpath(logPath + "/" + jsonLogFileName)
-            jsonSettingsDict['jsonLogFileName'] = jsonLogFileName
-            print(f"JSON log file will be located at {F.YELLOW}" + jsonLogFileName + f"{S.R}\n")
-    else:
-        current.logFileName = os.path.normpath(defaultLogPath + "/" + fileName)
-        print(f"Log file will be called {F.YELLOW}" + current.logFileName + f"{S.R}\n")
+    logPath = current_config.logging.log_path
+    if not logPath or logPath.lower() == "default": # For backwards compatibility and empty string
+        logPath = defaultLogPath
+
+    current.logFileName = os.path.normpath(os.path.join(logPath, fileName)) # Use os.path.join
+    print(f"Log file will be located at {F.YELLOW}{current.logFileName}{S.R}\n")
+
+    if jsonLogging and jsonLogFileName: # Ensure jsonLogFileName is set
+        fullJsonLogPath = os.path.normpath(os.path.join(logPath, jsonLogFileName)) # Use os.path.join
+        jsonSettingsDict['jsonLogFileName'] = fullJsonLogPath
+        print(f"JSON log file will be located at {F.YELLOW}{fullJsonLogPath}{S.R}\n")
+    elif jsonLogging and not jsonLogFileName: # Should not happen if jsonLogging is True
+        print(f"{F.RED}Error: JSON logging enabled but JSON log file name not set.{S.R}")
+
 
     if not bypass:
         input(f"Press {F.YELLOW}Enter{S.R} to display comments...     {B.LIGHTCYAN_EX}{F.BLACK} TIP: {S.R} Widen this window now, and more comment sample text will be visible next!")
 
     # Write heading info to log file
-    write_log_heading(current, logMode, filtersDict)
+    if logMode is not None: # Ensure logMode is set before calling write_log_heading
+        write_log_heading(current, logMode, filtersDict)
+    else:
+        print(f"{F.RED}Error: logMode is not set, cannot write log heading.{S.R}")
+
 
     jsonSettingsDict['jsonLogging'] = jsonLogging
 

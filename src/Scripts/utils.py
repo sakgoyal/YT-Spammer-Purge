@@ -19,12 +19,12 @@ from .types import ScanInstance
 
 ################################### GET VIDEO TITLE ###############################################
 # Check if video title is in dictionary, if not get video title from video ID using YouTube API request, then return title
-def get_video_title(current: ScanInstance, video_id: str):
+def get_video_title(youtube_service: Any, current: ScanInstance, video_id: str): # Added youtube_service parameter
     if video_id in current.vidTitleDict.keys():
         title = current.vidTitleDict[video_id]
     elif not current.errorOccurred:
         try:
-            results = auth.YOUTUBE.videos().list(part="snippet", id=video_id, fields="items/snippet/title", maxResults=1).execute()
+            results = youtube_service.videos().list(part="snippet", id=video_id, fields="items/snippet/title", maxResults=1).execute()
         except HttpError as hx:
             traceback.print_exc()
             print_http_error_during_scan(hx)
@@ -130,11 +130,12 @@ def process_spammer_ids(rawString: str):
     IDList = list(inputList)  # Need to use list() instead of just setting equal so each list is separately affected, otherwise same pointer
 
     # Validate each ID in list
-    for item, i in enumerate(inputList):  ## !!! THIS IS WRONG. ITEM AND I ARE SWAPPED. ENUMAERATE RETURNS (INDEX, VALUE) !!!
-        valid, IDList[i], _ = validation.validate_channel_id(item)
+    for index, value in enumerate(inputList):  # Correctly named variables & fixed comment
+        valid, validated_id, _ = validation.validate_channel_id(value) # Pass the value to validate
         if valid is False:
-            print(f"{B.RED}{F.BLACK}Invalid{S.R} Channel ID or Link: {inputList[i]}\n")
+            print(f"{B.RED}{F.BLACK}Invalid{S.R} Channel ID or Link: {value}\n") # Print the original problematic value
             return False, None
+        IDList[index] = validated_id # Store the validated ID at the correct index
 
     return True, IDList
 

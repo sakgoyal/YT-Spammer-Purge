@@ -21,13 +21,15 @@ from pwinput import pwinput
 from YTSpammerPurge import User, configVersion
 
 from . import validation
-from .files import load_config_file
+from . import files # Changed to import files directly
 from .shared_imports import B, F, S
 
 TOKEN_FILE_NAME = 'token.pickle'
 TOKEN_ENCRYPTED_NAME = 'token.pickle.encrypted'
 
-encrypt_config = load_config_file(onlyGetSettings=True, configVersion=configVersion)['encrypt_token_file']
+# Load only the encrypt_token_file setting using the new orchestrator
+temp_config_container = files.load_config_orchestrator(configVersion=configVersion, only_get_encrypt_setting=True)
+encrypt_config = temp_config_container.general.encrypt_token_file
 
 # Encryption Settings
 SALT_BYTES = 64
@@ -161,7 +163,7 @@ class ChannelIDError(Exception):
 
 
 # Get channel ID and channel title of the currently authorized user
-def get_current_user(config: dict[str, str]):
+def get_current_user(your_channel_id_setting: str, is_channel_id_ask: bool): # Modified signature
     # Define fetch function so it can be re-used if issue and need to re-run it
     def fetch_user() -> dict[Literal["items"], list[dict[str, str]]]:
         results = (
@@ -187,7 +189,8 @@ def get_current_user(config: dict[str, str]):
         print("> You are logging in with a Google Account that does not have a YouTube channel created yet.")
         print("> When choosing the account to log into, you selected the option showing the Google Account's email address, which might not have a channel attached to it.")
         input("\nPress Enter to try logging in again...")
-        os.remove(TOKEN_FILE_NAME)
+        if os.path.exists(TOKEN_FILE_NAME): os.remove(TOKEN_FILE_NAME) # Check before removing
+        if os.path.exists(TOKEN_ENCRYPTED_NAME): os.remove(TOKEN_ENCRYPTED_NAME) # Check before removing
 
         global YOUTUBE
         YOUTUBE = get_authenticated_service()
@@ -217,21 +220,29 @@ def get_current_user(config: dict[str, str]):
         input("\nPress Enter to Exit...")
         sys.exit()
 
-    if config is None:
-        configMatch = None  # Used only if channel ID is set in the config
-    elif config['your_channel_id'] == "ask":
+    configMatch = None
+    if is_channel_id_ask: # If your_channel_id was 'ask'
         configMatch = None
-    elif validation.validate_channel_id(config['your_channel_id'])[0]:
-        if config['your_channel_id'] == channelID:
-            configMatch = True
+    elif your_channel_id_setting: # If a specific channel ID was provided in config
+        # The your_channel_id_setting should already be validated by validate_config_settings if it's not 'ask'
+        # However, we re-validate here to be safe or if called in a context where it wasn't pre-validated.
+        is_valid_config_channel_id, _, _ = validation.validate_channel_id(your_channel_id_setting)
+        if is_valid_config_channel_id:
+            if your_channel_id_setting == channelID:
+                configMatch = True
+            else:
+                print("Error: The channel ID in the config file appears to be valid, but does not match the channel ID of the currently logged in user.")
+                input("Please check the config file. Press Enter to Exit...")
+                sys.exit()
         else:
-            print("Error: The channel ID in the config file appears to be valid, but does not match the channel ID of the currently logged in user.")
+            # This case should ideally be caught by validate_config_settings earlier
+            print("Error: The channel ID in the config file appears to be invalid.")
             input("Please check the config file. Press Enter to Exit...")
             sys.exit()
+    # If your_channel_id_setting is None or empty (should not happen if defaults are applied correctly), treat as 'ask'
     else:
-        print("Error: The channel ID in the config file appears to be invalid.")
-        input("Please check the config file. Press Enter to Exit...")
-        sys.exit()
+        configMatch = None
+
 
     return channelID, channelTitle, configMatch
 

@@ -19,6 +19,7 @@ dependencies = [
     "cryptography>=45.0.4",
     "packaging>=25.0",
     "regex>=2024.11.6",
+    "tqdm>=4.66.0",
 ]
 classifiers = [
     "Operating System :: MacOS",

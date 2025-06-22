@@ -29,7 +29,7 @@ type FilterMode = Literal["Username", "Text", "NameAndText"]
 
 
 # For scanning for individual chars
-def prepare_filter_mode_chars(_scanMode: Any, filterMode: FilterMode, config: dict[str, Any]):
+def prepare_filter_mode_chars(_scanMode: Any, filterMode: FilterMode, current_config: files.ConfigContainer):
     if filterMode == "Username":
         whatToScanMsg = "Usernames"
     elif filterMode == "Text":
@@ -37,7 +37,8 @@ def prepare_filter_mode_chars(_scanMode: Any, filterMode: FilterMode, config: di
     elif filterMode == "NameAndText":
         whatToScanMsg = "Usernames and Comment Text"
 
-    if config['characters_to_filter'] != "ask":
+    # 'characters_to_filter' is in [filter_modes] section
+    if current_config.filter_modes.characters_to_filter != "ask":
         print("Characters to filter obtained from config file.")
     else:
         print(f"\nNext, you will input {F.YELLOW}ONLY{S.R} any special characters / emojis you want to search for in all {whatToScanMsg}. Do not include commas or spaces!")
@@ -49,8 +50,9 @@ def prepare_filter_mode_chars(_scanMode: Any, filterMode: FilterMode, config: di
     confirm = False
     validConfigSetting = True
     while not confirm:
-        if validConfigSetting and config and config['characters_to_filter'] != "ask":
-            inputChars = utils.make_char_set(config['characters_to_filter'], stripLettersNumbers=True, stripKeyboardSpecialChars=False, stripPunctuation=True)
+        # 'characters_to_filter' is in [filter_modes] section
+        if validConfigSetting and current_config.filter_modes.characters_to_filter != "ask":
+            inputChars = utils.make_char_set(current_config.filter_modes.characters_to_filter, stripLettersNumbers=True, stripKeyboardSpecialChars=False, stripPunctuation=True)
             bypass = True
         else:
             bypass = False
@@ -79,7 +81,7 @@ def prepare_filter_mode_chars(_scanMode: Any, filterMode: FilterMode, config: di
 
 
 # For scanning for strings
-def prepare_filter_mode_strings(_scanMode: Any, filterMode: FilterMode, config: dict[str, Any]):
+def prepare_filter_mode_strings(_scanMode: Any, filterMode: FilterMode, current_config: files.ConfigContainer):
     if filterMode == "Username":
         whatToScanMsg = "Usernames"
     elif filterMode == "Text":
@@ -87,7 +89,8 @@ def prepare_filter_mode_strings(_scanMode: Any, filterMode: FilterMode, config: 
     elif filterMode == "NameAndText":
         whatToScanMsg = "Usernames and Comment Text"
 
-    if config['strings_to_filter'] != "ask":
+    # 'strings_to_filter' is in [filter_modes] section
+    if current_config.filter_modes.strings_to_filter != "ask":
         print("Strings to filter obtained from config file.")
     else:
         print(f"\nPaste or type in a list of any {F.YELLOW}comma separated strings{S.R} you want to search for in {whatToScanMsg}. (Not case sensitive)")
@@ -97,8 +100,9 @@ def prepare_filter_mode_strings(_scanMode: Any, filterMode: FilterMode, config: 
     validEntry = False
     validConfigSetting = True
     while not validEntry:
-        if validConfigSetting and config and config['strings_to_filter'] != "ask":
-            inputString = config['strings_to_filter']
+        # 'strings_to_filter' is in [filter_modes] section
+        if validConfigSetting and current_config.filter_modes.strings_to_filter != "ask":
+            inputString = current_config.filter_modes.strings_to_filter
             bypass = True
         else:
             bypass = False
@@ -114,7 +118,8 @@ def prepare_filter_mode_strings(_scanMode: Any, filterMode: FilterMode, config: 
             validConfigSetting = False
 
         if validEntry:
-            if config['strings_to_filter'] != "ask":
+                # 'strings_to_filter' is in [filter_modes] section
+                if current_config.filter_modes.strings_to_filter != "ask":
                 pass
             else:
                 print(f"     {whatToScanMsg} will be scanned for {F.MAGENTA}ANY{S.R} of the following strings:")
@@ -131,7 +136,7 @@ def prepare_filter_mode_strings(_scanMode: Any, filterMode: FilterMode, config: 
 
 
 # For scanning for regex expression
-def prepare_filter_mode_regex(_scanMode: int, filterMode: FilterMode, config: dict[str, str]):
+def prepare_filter_mode_regex(_scanMode: int, filterMode: FilterMode, current_config: files.ConfigContainer):
     if filterMode == "Username":
         whatToScanMsg = "Usernames"
     elif filterMode == "Text":
@@ -139,7 +144,8 @@ def prepare_filter_mode_regex(_scanMode: int, filterMode: FilterMode, config: di
     elif filterMode == "NameAndText":
         whatToScanMsg = "Usernames and Comment Text"
 
-    if config['regex_to_filter'] != "ask":
+    # 'regex_to_filter' is in [filter_modes] section
+    if current_config.filter_modes.regex_to_filter != "ask":
         print("Regex expression obtained from config file.")
         validConfigSetting = True
     else:
@@ -149,8 +155,9 @@ def prepare_filter_mode_regex(_scanMode: int, filterMode: FilterMode, config: di
     validExpression = False
 
     while not validExpression:
-        if validConfigSetting and config and config['regex_to_filter'] != "ask":
-            inputtedExpression = config['regex_to_filter']
+        # 'regex_to_filter' is in [filter_modes] section
+        if validConfigSetting and current_config.filter_modes.regex_to_filter != "ask":
+            inputtedExpression = current_config.filter_modes.regex_to_filter
             bypass = True
         else:
             inputtedExpression = input("Input Expression Here:  ")
@@ -183,12 +190,13 @@ def prepare_filter_mode_regex(_scanMode: int, filterMode: FilterMode, config: di
 
 # Filter Mode: User manually enters ID
 # Returns inputtedSpammerChannelID
-def prepare_filter_mode_ID(_scanMode: str, config: dict[str, str]):
+def prepare_filter_mode_ID(_scanMode: str, current_config: files.ConfigContainer):
     processResult = (False, None)  # Tuple, first element is status of validity of channel ID, second element is channel ID
     validConfigSetting = True
     while not processResult[0]:
-        if validConfigSetting and config and config['channel_ids_to_filter'] != "ask":
-            inputtedSpammerChannelID = config['channel_ids_to_filter']
+        # 'channel_ids_to_filter' is in [filter_modes] section
+        if validConfigSetting and current_config.filter_modes.channel_ids_to_filter != "ask":
+            inputtedSpammerChannelID = current_config.filter_modes.channel_ids_to_filter
         else:
             inputtedSpammerChannelID = input(f"Enter the {F.LIGHTRED_EX} Channel link(s) or ID(s){S.R} of the spammer (comma separated): ")
             if str(inputtedSpammerChannelID).lower() == "x":
@@ -207,7 +215,8 @@ def prepare_filter_mode_ID(_scanMode: str, config: dict[str, str]):
         print(f"{B.RED}{F.WHITE} WARNING: {S.R} - You entered your own channel ID!")
         print(f"For safety purposes, this program always {F.YELLOW}ignores{S.R} your own comments.")
 
-        if config['channel_ids_to_filter'] != "ask":
+        # 'channel_ids_to_filter' is in [filter_modes] section
+        if current_config.filter_modes.channel_ids_to_filter != "ask":
             pass
         else:
             input("\nPress Enter to Continue...")
@@ -216,7 +225,7 @@ def prepare_filter_mode_ID(_scanMode: str, config: dict[str, str]):
 
 
 # For Filter mode auto-ascii, user inputs nothing, program scans for non-ascii
-def prepare_filter_mode_non_ascii(scanMode: str, config: dict[str, str]):
+def prepare_filter_mode_non_ascii(scanMode: str, current_config: files.ConfigContainer):
     print("\n-------------------------------------------------- ASCII Mode--------------------------------------------------")
     print("~~~ This mode automatically searches for usernames that contain special characters (aka not letters/numbers) ~~~\n")
     print("Choose the sensitivity level of the filter. You will be shown examples after you choose.")
@@ -229,8 +238,9 @@ def prepare_filter_mode_non_ascii(scanMode: str, config: dict[str, str]):
     confirmation = False
     validConfigSetting = True
     while not confirmation:
-        if validConfigSetting and config and config['autoascii_sensitivity'] != "ask":
-            selection = config['autoascii_sensitivity']
+        # 'autoascii_sensitivity' is in [filter_modes] section
+        if validConfigSetting and current_config.filter_modes.autoascii_sensitivity != "ask":
+            selection = current_config.filter_modes.autoascii_sensitivity
             bypass = True
         else:
             bypass = False
@@ -283,7 +293,7 @@ import regex as re
 
 
 # Auto smart mode
-def prepare_filter_mode_smart(scanMode: str, config: dict[str, str], miscData: Any, sensitive: bool = False):
+def prepare_filter_mode_smart(scanMode: str, current_config: files.ConfigContainer, miscData: Any, sensitive: bool = False):
     # Get spam lists and version info
     rootDomainList = miscData.resources['rootDomainList']
     spamDomainsList = miscData.spamLists['spamDomainsList']  # List of domains from crowd sourced list
@@ -291,7 +301,8 @@ def prepare_filter_mode_smart(scanMode: str, config: dict[str, str], miscData: A
     spamAccountsList = miscData.spamLists['spamAccountsList']  # List of mentioned instagram/telegram scam accounts from crowd sourced list
     spamListsVersion = miscData.spamLists['latestLocalVersion']
 
-    if config['filter_mode'] == "autosmart":
+    # 'filter_mode' is in [filter_modes] section
+    if current_config.filter_modes.filter_mode == "autosmart":
         pass
     else:
         if sensitive:
@@ -492,13 +503,14 @@ def prepare_filter_mode_smart(scanMode: str, config: dict[str, str], miscData: A
 
 
 ################################ RECOVERY MODE ###########################################
-def recover_deleted_comments(config: dict[str, str]):
+def recover_deleted_comments(current_config: files.ConfigContainer):
     print(f"\n\n-------------------- {F.LIGHTGREEN_EX}Comment Recovery Mode{S.R} --------------------\n")
     print("> Believe it or not, the YouTube API actually allows you to re-instate \"deleted\" comments.")
     print(f"> This is {F.YELLOW}only possible if you have stored the comment IDs{S.R} of the deleted comments, \n   such as {F.YELLOW}having kept the log file{S.R} of that session.")
     print("> If you don't have the comment IDs you can't recover the comments, and there is no way to find them. \n")
 
-    recoveryList, _listFileName = files.parse_comment_list(config, recovery=True)
+    # files.parse_comment_list now takes current_config
+    recoveryList, _listFileName = files.parse_comment_list(current_config, recovery=True)
     if recoveryList == "MainMenu":
         return "MainMenu"
 
@@ -507,7 +519,7 @@ def recover_deleted_comments(config: dict[str, str]):
 
 
 ################################ DELETE COMMENT LIST ###########################################
-def delete_comment_list(config: dict[str, Any]):
+def delete_comment_list(current_config: files.ConfigContainer):
     progressDict = {}
     progressFileFolder = os.path.join(RESOURCES_FOLDER_NAME, "Removal_List_Progress")
     print(f"\n\n-------------------- {F.LIGHTRED_EX}Delete Using a List / Log{S.R} --------------------")
@@ -528,7 +540,8 @@ def delete_comment_list(config: dict[str, Any]):
         previousFailedComments: list[str] = []
         sessionNum = 1
 
-        removalList, listFileNameBase = files.parse_comment_list(config, removal=True, returnFileName=True)
+        # files.parse_comment_list now takes current_config
+        removalList, listFileNameBase = files.parse_comment_list(current_config, removal=True, returnFileName=True)
         if removalList == "MainMenu":
             return "MainMenu"
 
@@ -571,7 +584,8 @@ def delete_comment_list(config: dict[str, Any]):
 
         while not valid:
             input(f"\nNext, follow the process by loading {F.YELLOW}the same comment list/log you used before{S.R}. Press Enter to Continue...")
-            removalList, listFileNameBase = files.parse_comment_list(config, removal=True, returnFileName=True)
+            # files.parse_comment_list now takes current_config
+            removalList, listFileNameBase = files.parse_comment_list(current_config, removal=True, returnFileName=True)
             if removalList == "MainMenu":
                 return "MainMenu"
 
@@ -650,7 +664,8 @@ def delete_comment_list(config: dict[str, Any]):
             return "MainMenu"
 
     # Set limit based on quota
-    quotaLimit = int(config['quota_limit']) - 100
+    # 'quota_limit' is in [Logging] section and is an int
+    quotaLimit = current_config.logging.quota_limit - 100
 
     validInput = False
     while not validInput:
